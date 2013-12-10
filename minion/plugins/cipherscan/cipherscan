@@ -1,0 +1,234 @@
+#!/usr/bin/env bash
+
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+# Author: Julien Vehent [:ulfr] - 2013
+
+DOBENCHMARK=0
+BENCHMARKITER=30
+OPENSSLBIN="$(dirname $0)/openssl"
+TIMEOUT=10
+CIPHERSUITE="ALL:COMPLEMENTOFALL"
+TARGET=$1
+VERBOSE=0
+ALLCIPHERS=0
+OUTPUTFORMAT="terminal"
+REQUEST="GET / HTTP/1.1
+Host: $TARGET
+Connection: close
+
+
+"
+
+
+usage() {
+    echo -e "usage: $0 <target:port>
+
+$0 attempts to connect to a target site using all the ciphersuites it knowns.
+Julien Vehent [:ulfr] - https://github.com/jvehent/cipherscan
+
+example: $ $0 www.google.com:443
+
+Use only one of the options below:
+-v     increase verbosity
+-a     test all known ciphers individually at the end
+-json  output results in json format
+
+OpenSSL path can be changed in the OPENSSLBIN variable
+Benchmarking can be enabled in the DOBENCHMARK variable
+"
+    exit 1
+}
+
+
+verbose() {
+    if [ $VERBOSE -eq 1 ];then
+        echo $@
+    fi
+}
+
+
+# Connect to a target host with the selected ciphersuite
+test_cipher_on_target() {
+    local sslcommand=$@
+    cipher=""
+    protocols=""
+    pfs=""
+    for tls_version in "-ssl2" "-ssl3" "-tls1" "-tls1_1" "-tls1_2"
+    do
+        local tmp=$(mktemp)
+        $sslcommand $tls_version 1>"$tmp" 2>/dev/null << EOF
+$REQUEST
+EOF
+        current_cipher=$(grep "New, " $tmp|awk '{print $5}')
+        current_pfs=$(grep 'Server Temp Key' $tmp|awk '{print $4$5$6$7}')
+        current_protocol=$(grep -E "^\s+Protocol\s+:" $tmp|awk '{print $3}')
+        if [[ -z "$current_protocol" || "$current_cipher" == '(NONE)' ]]; then
+            # connection failed, try again with next TLS version
+            continue
+        fi
+        # connection succeeded, add TLS version to positive results
+        if [ -z "$protocols" ]; then
+            protocols=$current_protocol
+        else
+            protocols="$protocols,$current_protocol"
+        fi
+        cipher=$current_cipher
+        pfs=$current_pfs
+        # grab the cipher and PFS key size
+        rm "$tmp"
+    done
+    # if cipher is empty, that means none of the TLS version worked with
+    # the current cipher
+    if [ -z "$cipher" ]; then
+        verbose "handshake failed, no ciphersuite was returned"
+        result='ConnectionFailure'
+        return 2
+
+    # if cipher contains NONE, the cipher wasn't accepted
+    elif [ "$cipher" == '(NONE)  ' ]; then
+        result="$cipher $protocols $pfs"
+        verbose "handshake failed, server returned ciphersuite '$result'"
+        return 1
+
+    # the connection succeeded
+    else
+        result="$cipher $protocols $pfs"
+        verbose "handshake succeeded, server returned ciphersuite '$result'"
+        return 0
+    fi
+}
+
+
+# Calculate the average handshake time for a specific ciphersuite
+bench_cipher() {
+    local ciphersuite="$1"
+    local sslcommand="timeout $TIMEOUT $OPENSSLBIN s_client -connect $TARGET -cipher $ciphersuite"
+    local t="$(date +%s%N)"
+    verbose "Benchmarking handshake on '$TARGET' with ciphersuite '$ciphersuite'"
+    for i in $(seq 1 $BENCHMARKITER); do
+        $sslcommand 2>/dev/null 1>/dev/null << EOF
+$REQUEST
+EOF
+        if [ $? -gt 0 ]; then
+            break
+        fi
+    done
+    # Time interval in nanoseconds
+    local t="$(($(date +%s%N) - t))"
+    verbose "Benchmarking done in $t nanoseconds"
+    # Microseconds
+    cipherbenchms="$((t/1000/$BENCHMARKITER))"
+}
+
+
+# Connect to the target and retrieve the chosen cipher
+# recursively until the connection fails
+get_cipher_pref() {
+    [ "$OUTPUTFORMAT" == "terminal" ] && echo -n '.'
+    local ciphersuite="$1"
+    local sslcommand="timeout $TIMEOUT $OPENSSLBIN s_client -connect $TARGET -cipher $ciphersuite"
+    verbose "Connecting to '$TARGET' with ciphersuite '$ciphersuite'"
+    test_cipher_on_target "$sslcommand"
+    local success=$?
+    # If the connection succeeded with the current cipher, benchmark and store
+    if [ $success -eq 0 ]; then
+        cipherspref=("${cipherspref[@]}" "$result")
+        pciph=$(echo $result|awk '{print $1}')
+        get_cipher_pref "!$pciph:$ciphersuite"
+        return 0
+    fi
+}
+
+
+display_results_in_terminal() {
+    # Display the results
+    ctr=1
+    for cipher in "${cipherspref[@]}"; do
+        pciph=$(echo $cipher|awk '{print $1}')
+        if [ $DOBENCHMARK -eq 1 ]; then
+            bench_cipher "$pciph"
+            r="$ctr $cipher $cipherbenchms"
+        else
+            r="$ctr $cipher"
+        fi
+        results=("${results[@]}" "$r")
+        ctr=$((ctr+1))
+    done
+
+    if [ $DOBENCHMARK -eq 1 ]; then
+        header="prio ciphersuite protocols pfs_keysize avg_handshake_microsec"
+    else
+        header="prio ciphersuite protocols pfs_keysize"
+    fi
+    ctr=0
+    for result in "${results[@]}"; do
+        if [ $ctr -eq 0 ]; then
+            echo $header
+            ctr=$((ctr+1))
+        fi
+        echo $result|grep -v '(NONE)'
+    done|column -t
+}
+
+
+display_results_in_json() {
+    # Display the results in json
+    ctr=0
+    echo -n "{\"target\":\"$TARGET\",\"date\":\"$(date -R)\",\"ciphersuite\": ["
+    for cipher in "${cipherspref[@]}"; do
+        [ $ctr -gt 0 ] && echo -n ','
+        echo -n "{\"cipher\":\"$(echo $cipher|awk '{print $1}')\","
+        echo -n "\"protocols\":[\"$(echo $cipher|awk '{print $2}'|sed 's/,/","/g')\"],"
+        pfs=$(echo $cipher|awk '{print $3}')
+        [ "$pfs" == "" ] && pfs="None"
+        echo -n "\"pfs\":\"$pfs\"}"
+        ctr=$((ctr+1))
+    done
+    echo ']}'
+}
+
+
+[[ -z $1 || "$1" == "-h" || "$1" == "--help" ]] && usage
+if [ ! -z $2 ]; then
+    if [ "$2" == "-v" ]; then
+        VERBOSE=1
+        echo "Loading $($OPENSSLBIN ciphers -v $CIPHERSUITE 2>/dev/null|grep Kx|wc -l) ciphersuites from $(echo -n $($OPENSSLBIN version 2>/dev/null))"
+        $OPENSSLBIN ciphers ALL 2>/dev/null
+    elif [ "$2" == "-a" ]; then
+        ALLCIPHERS=1
+    elif [ "$2" == "-json" ]; then
+        OUTPUTFORMAT="json"
+    else
+        echo "ERROR: unknown option '$2'"; echo
+        usage
+    fi
+fi
+
+cipherspref=();
+results=()
+
+# Call to the recursive loop that retrieves the cipher preferences
+get_cipher_pref $CIPHERSUITE
+
+if [ "$OUTPUTFORMAT" == "json" ]; then
+    display_results_in_json
+else
+    echo
+    display_results_in_terminal
+fi
+
+# If asked, test every single cipher individually
+if [ $ALLCIPHERS -gt 0 ]; then
+    echo; echo "All accepted ciphersuites"
+    for c in $($OPENSSLBIN ciphers -v ALL:COMPLEMENTOFALL 2>/dev/null |awk '{print $1}'|sort|uniq); do
+        r="fail"
+        osslcommand="timeout $TIMEOUT $OPENSSLBIN s_client -connect $TARGET -cipher $c"
+        test_cipher_on_target "$osslcommand"
+        if [ $? -eq 0 ]; then
+            r="pass"
+        fi
+        echo "$c $r"|awk '{printf "%-35s %s\n",$1,$2}'
+    done
+fi
