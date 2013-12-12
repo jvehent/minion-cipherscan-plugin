@@ -5,7 +5,9 @@
 from setuptools import setup
 
 install_requires = [
-    'minion-backend'
+    'cipherscan',
+    'minion-backend',
+    'openssl'
 ]
 
 setup(name="minion-cipherscan-plugin",
