@@ -5,9 +5,7 @@
 from setuptools import setup
 
 install_requires = [
-    'cipherscan',
     'minion-backend',
-    'openssl'
 ]
 
 setup(name="minion-cipherscan-plugin",
@@ -16,7 +14,7 @@ setup(name="minion-cipherscan-plugin",
       url="https://github.com/jvehent/minion-cipherscan-plugin",
       author="Mozilla",
       author_email="ulfr@mozilla.com",
-      packages=['minion', 'minion.plugins'],
+      packages=['minion', 'minion.plugins', 'minion.plugins.cipherscan'],
       namespace_packages=['minion', 'minion.plugins'],
       include_package_data=True,
       install_requires = install_requires)

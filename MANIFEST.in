@@ -1,0 +1,2 @@
+include minion/plugins/cipherscan/cipherscan
+include minion/plugins/cipherscan/openssl
