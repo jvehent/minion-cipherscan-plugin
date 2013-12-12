@@ -102,8 +102,8 @@ def check_distance(self):
     """ check distance from ref ciphersuite """
     desc = ("This test measure the distance from the retrieved ciphersuite "
             "to the standard ciphersuite recommended by Mozilla.")
-    sev = "OK"
-    summary = "Retrieved ciphersuite is close to Mozilla's standard"
+    sev = "Info"
+    summary = "Retrieved ciphersuite is close to Mozilla's standard. "
     issue = []
     csuite = retrieve_csuite(self.scan_output["ciphersuite"])
     logging.debug("CipherScanPlugin ciphersuite: %s" % csuite)
@@ -111,11 +111,13 @@ def check_distance(self):
     logging.debug("CipherScanPlugin Damerau-Levenshtein distance %s" % dld)
     if dld > 500:
         sev = "Medium"
-        summary = "Ciphersuite is far from Mozilla's standard"
+        summary = "Ciphersuite is far from Mozilla's standard. "
     elif dld > 250:
-        sev = "Low"
-        summary = "Ciphersuite is different from Mozilla's standard"
-    issue = ({"Distance": dld, "Severity": sev, "Summary": summary,
+        sev ="Low"
+        summary = "Ciphersuite is different from Mozilla's standard. "
+
+    summary += "ciphersuite='%s'" % csuite
+    issue = ({"Severity": sev, "Summary": summary,
               "Solution": self.SOLUTION, "Description": desc})
     return issue
 
@@ -165,7 +167,7 @@ def check_pfs_pref(self):
             "an attacker from being able to decrypt traffic by obtaining "
             "the private key alone.")
     summary = "PFS ciphers are preferred"
-    sev = "OK"
+    sev = "Info"
     issue = []
     pos = 1
     has_pfs = False
@@ -189,8 +191,8 @@ def check_pfs_keysize_dhe(self):
     desc = ("PFS key size for Diffie-Hellman key exchange should be "
             "equal to the RSA key size. In most cases, this should be "
             "2048 bits.")
-    sev = "OK"
-    summary = "DHE keysize is up to standard"
+    sev = "Info"
+    summary = "DHE keysize is up to standard."
     keysize = 0
     issue = []
     for entry in self.scan_output["ciphersuite"]:
@@ -200,14 +202,15 @@ def check_pfs_keysize_dhe(self):
             keysize = int(keysize)
             if keysize <= 512:
                 sev = "High"
-                summary = "DHE keysize is dangerously small"
+                summary = "DHE keysize is dangerously small."
             elif keysize <= 1024:
                 sev = "Medium"
-                summary = "DHE keysize is smaller than Mozilla's standard"
+                summary = "DHE keysize is smaller than Mozilla's standard."
             elif keysize < 2048:
                 sev = "Low"
-                summary = "DHE keysize is smaller than Mozilla's standard"
+                summary = "DHE keysize is smaller than Mozilla's standard."
             break
+    summary += " Keysize=%sbits" % keysize
     if keysize > 0:
         issue = ({"Keysize": keysize, "Severity": sev, "Summary": summary,
                   "Solution": self.SOLUTION, "Description": desc})
@@ -218,8 +221,8 @@ def check_pfs_keysize_ecdhe(self):
     desc = ("PFS key size for Elliptic Curves key exchange should be "
             "proportional to the RSA key size. In most cases, this should be "
             "256 bits.")
-    sev = "OK"
-    summary = "ECDHE keysize is up to standard"
+    sev = "Info"
+    summary = "ECDHE keysize is up to standard."
     keysize = 0
     issue = []
     for entry in self.scan_output["ciphersuite"]:
@@ -230,14 +233,15 @@ def check_pfs_keysize_ecdhe(self):
             keysize = int(keysize)
             if keysize <= 64:
                 sev = "High"
-                summary = "ECDHE keysize is dangerously small"
+                summary = "ECDHE keysize is dangerously small."
             elif keysize <= 128:
                 sev = "Medium"
-                summary = "ECDHE keysize is smaller than Mozilla's standard"
+                summary = "ECDHE keysize is smaller than Mozilla's standard."
             elif keysize < 256:
                 sev = "Low"
-                summary = "ECDHE keysize is smaller than Mozilla's standard"
+                summary = "ECDHE keysize is smaller than Mozilla's standard."
             break
+    summary += " Keysize=%sbits" % keysize
     if keysize > 0:
         issue = ({"Keysize": keysize, "Severity": sev, "Summary": summary,
                   "Solution": self.SOLUTION, "Description": desc})
@@ -246,7 +250,7 @@ def check_pfs_keysize_ecdhe(self):
 def check_tls_protocols(self):
     """ Check TLS protocol support """
     desc = "All versions of TLS should be supported."
-    sev = "OK"
+    sev = "Info"
     summary = "All versions of TLS are supported"
     TLS1 = False
     TLS11 = False
@@ -280,7 +284,7 @@ def check_rc4_notfirst(self):
             "It can be used for backward compatibility with old clients, "
             "but should be listed at the bottom of the ciphersuite.")
     summary = "RC4 cipher not found"
-    sev = "OK"
+    sev = "Info"
     issue = []
     pos = 1
     clist_len = len(self.scan_output["ciphersuite"])
@@ -319,7 +323,7 @@ def check_rc4_or_3des(self):
         if "DES-CBC3" in entry["cipher"]:
             DES = True
     if RC4 or DES:
-        sev = "OK"
+        sev = "Info"
         summary = "Legacy ciphers are supported: "
         if RC4:
             summary += "RC4"
